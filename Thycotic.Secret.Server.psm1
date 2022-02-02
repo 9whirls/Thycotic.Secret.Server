@@ -1,27 +1,38 @@
+if ($env:SKIP_CERTIFICATE_CHECK -eq 'true') {
+  $global:scc = $true
+} else {
+  $global:scc = $false
+}
+
 function Connect-TSS {
   param(
     [Parameter(Mandatory = $true)]
     [string] 
-      $fqdn,
+      $address,
     [Parameter(Mandatory = $true)]
     [pscredential] 
-      $credential,
-    [Parameter(Mandatory = $true)]  
-    [string]
-      $domain
+      $credential
   )
+
+  $uri = "https://$address/oauth2/token"
+  $data = @{
+    'username' = $Credential.UserName
+    'password' = ($Credential.GetNetworkCredential()).Password
+    'grant_type' = 'password' 
+  }
+
+  $token = Invoke-RestMethod -Uri $uri -Method Post -body $data -SkipCertificateCheck:$scc | 
+    select -expandproperty access_token
   
-  [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-  [Net.ServicePointManager]::SecurityProtocol = 'Tls12'
-  $proxy = New-WebServiceProxy -uri "https://$fqdn/webservices/sswebservice.asmx" -UseDefaultCredential -Namespace "ss"
-  $proxy.CookieContainer = New-Object System.Net.CookieContainer
-  $token = $proxy.authenticate($Credential.UserName, 
-    ($Credential.GetNetworkCredential()).Password, '', $domain) | select -expandproperty token
+  $tss = new-object PSObject -Property @{
+    address = $address
+    head = @{
+      'Authorization' = "Bearer $token" 
+    }
+  }
   
-  $proxy | add-member -name 'token' -MemberType NoteProperty -value $token
-  
-  $Global:defaultTss = $proxy
-  return $proxy
+  $Global:defaultTss = $tss
+  return $tss
 }
 
 function Get-TssSubFolder {
@@ -29,17 +40,50 @@ function Get-TssSubFolder {
     [Parameter(
       Helpmessage = 'Parent Folder ID'
     )]
-    [int]
-      $id = -1,
-      
+    [int] $parentFolderId = -1,
+
+    [int] $take = [int32]::MaxValue,
+
     $tss = $defaultTss
   )
   
-  $folders = $tss.foldergetallchildren($defaulttss.token, $id) | select -ExpandProperty folders | ?{$_.id -ne 1}
-  $folders
-  foreach ($f in $folders) {
-    Get-TssSubFolder $f.id $tss
-  }  
+  $uri = "https://$($tss.address)/api/v1/folders?filter.parentFolderId=$parentFolderId&take=$take"
+  
+  Invoke-RestMethod -Uri $uri -Method Get -Headers $tss.head -SkipCertificateCheck:$scc |
+    select -ExpandProperty records
+}
+
+function Get-TssFolder {
+  param(
+    [Parameter(
+      Helpmessage = 'Folder ID',
+      Mandatory = $true
+    )]
+    [int] $id,
+
+    $tss = $defaultTss
+  )
+  
+  $uri = "https://$($tss.address)/api/v1/folders/$id"
+  
+  Invoke-RestMethod -Uri $uri -Method Get -Headers $tss.head -SkipCertificateCheck:$scc
+}
+
+function Get-TssFolderPermission {
+  param(
+    [Parameter(
+      Helpmessage = 'Folder ID',
+      Mandatory = $true
+    )]
+    [int] $id,
+
+    $tss = $defaultTss
+  )
+  
+  $uri = "https://$($tss.address)/api/v1/folder-permissions?filter.folderId=$id"
+  
+  Invoke-RestMethod -Uri $uri -Method Get -Headers $tss.head -SkipCertificateCheck:$scc |
+    select -ExpandProperty records
 }
 
 function Get-TssSecretInFolder {
@@ -50,45 +94,24 @@ function Get-TssSecretInFolder {
       ValueFromPipelineByPropertyName = $true,
       Helpmessage = 'Parent Folder ID'
     )]
-    [int]
-      $id,
-   
+    [int] $id,
+
+    [int] $take = [int32]::MaxValue,
+
     $tss = $defaultTss
   )
   begin {}
   process {
-    $folderPath = Get-TssFolderPath $id $tss
-    $tss.SearchSecretsByFolder($tss.token, '*', $id, $false, $false, $true) | 
-      select -ExpandProperty secretsummaries |
-      select *, @{ n='Path'; e={"{0}/{1}" -f $folderPath, $_.SecretName} }
+    $uri = "https://$($tss.address)/api/v1/secrets?filter.folderId=$id&take=$take"
+    $folderPath = Get-TssFolder $id $tss | select -ExpandProperty folderPath
+    Invoke-RestMethod -Uri $uri -Method Get -Headers $tss.head -SkipCertificateCheck:$scc |
+      select -ExpandProperty records |
+      select *, @{ n='path'; e={"{0}\{1}" -f $folderPath, $_.name} }
   }
   end {}
 }
 
-function Get-TssFolderPath {
-  param(
-    [Parameter(
-      Mandatory = $true,
-      ValueFromPipeline = $true,
-      ValueFromPipelineByPropertyName = $true
-    )]
-    [int]
-      $Id,
-      
-    $tss = $defaultTss
-  )
-  begin {}
-  process {
-    $thisFolder = $tss.folderGet($tss.token, $id) | select -ExpandProperty folder
-    if ($thisFolder.parentFolderId -eq -1) {$thisFolder.name}
-    else { 
-      (Get-TssFolderPath $thisFolder.parentFolderId) + "/" + $thisFolder.name
-    }
-  }
-  end {}
-}
-
-function Get-TssSecretData {
+function Get-TssSecret {
   param(
     [Parameter(
       Mandatory = $true,
@@ -97,54 +120,29 @@ function Get-TssSecretData {
       Helpmessage = 'Secret ID'
     )]
     [int]
-      $SecretId,
-   
+      $id,
+
     $tss = $defaultTss
   )
   begin {}
   process {
-    $tss.GetSecretLegacy($tss.token, $SecretId) | select -ExpandProperty secret
+    $uri = "https://$($tss.address)/api/v1/secrets/$id"
+  
+    Invoke-RestMethod -Uri $uri -Method Get -Headers $tss.head -SkipCertificateCheck:$scc
   }
   end {}
 }
 
-function Get-TssRestToken {
+function Get-TssSecretPassword {
   param(
     [Parameter(Mandatory = $true)]
-    [string] 
-      $fqdn,
-    [Parameter(Mandatory = $true)]
-    [pscredential] 
-      $credential
-  )
-  
-  [Net.ServicePointManager]::SecurityProtocol = 'Tls12'
-  $uri = "https://$fqdn/oauth2/token"
-  $data = @{
-    'username' = $Credential.UserName
-    'password' = ($Credential.GetNetworkCredential()).Password
-    'grant_type' = 'password' 
-  }
-  return (Invoke-RestMethod -Uri $uri -Method Post -body $data).access_token
-}
+    [int]
+      $id,
 
-function Get-TssRestSecretPassword {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string] 
-      $fqdn,
-    [Parameter(Mandatory = $true)]
-    [string] 
-      $token,
-    [Parameter(Mandatory = $true)]
-    [string]
-      $secretId
+    $tss = $defaultTss
   )
   
-  [Net.ServicePointManager]::SecurityProtocol = 'Tls12'
-  $uri = "https://$fqdn/api/v1/secrets/$secretId/fields/Password"
-  $head = @{
-    'Authorization' = "Bearer $token" 
-  }
-  return (Invoke-RestMethod -Uri $uri -Method Get -Headers $head)
+  $uri = "https://$($tss.address)/api/v1/secrets/$id/fields/Password"
+  
+  Invoke-RestMethod -Uri $uri -Method Get -Headers $tss.head -SkipCertificateCheck:$scc
 }
