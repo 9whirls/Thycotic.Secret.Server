@@ -12,7 +12,7 @@
 RootModule = 'Thycotic.Secret.Server.psm1'
 
 # Version number of this module.
-ModuleVersion = '0.5'
+ModuleVersion = '1.0'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -33,7 +33,7 @@ Copyright = '(c) 2020 Jian Liu. All rights reserved.'
 Description = 'Powershell module for Thycotic Secret Server'
 
 # Minimum version of the Windows PowerShell engine required by this module
-# PowerShellVersion = ''
+PowerShellVersion = '7.0'
 
 # Name of the Windows PowerShell host required by this module
 # PowerShellHostName = ''
@@ -69,7 +69,8 @@ Description = 'Powershell module for Thycotic Secret Server'
 # NestedModules = @()
 
 # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
-FunctionsToExport = @('Connect-Tss', 'Get-TssSubFolder', 'Get-TssSecretInFolder', 'Get-TssFolderPath', 'Get-TssSecretData', 'Get-TssRestToken', 'Get-TssRestSecretPassword')
+FunctionsToExport = @('Connect-Tss', 'Get-TssSubFolder', 'Get-TssFolder', 'Get-TssFolderPermission', 
+  'Get-TssSecretInFolder', 'Get-TssSecret', 'Get-TssSecretPassword')
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
 CmdletsToExport = @()
