@@ -7,4 +7,4 @@ Example
 $cred = Get-Credential
 Connect-Tss -fqdn my_secret_server_address -credential $cred -domain my_domain
 Get-TssSubFolder | Get-TssSecretInFolder
-Get-TssSubFolder | Get-TssSecretInFolder | Get-TssSecretData
+Get-TssSubFolder | Get-TssSecretInFolder | Get-TssSecret
